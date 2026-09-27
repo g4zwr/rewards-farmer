@@ -1,0 +1,174 @@
+name: Installer lint
+
+# The installers touch a user's machine: they create a virtualenv, may install
+# Python, may install Edge, and may register a scheduled task. A syntax error in
+# one of them is discovered by the user, at the worst moment, so the parts that
+# can be checked without a Windows or macOS machine are checked here instead.
+#
+# This runs on every push and pull request because it is seconds, not minutes.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint installers
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck --severity=style install.sh
+          shellcheck --severity=style scripts/run_daily.sh
+
+      - name: Bash syntax
+        run: |
+          for script in install.sh scripts/run_daily.sh; do
+            bash -n "$script"
+            echo "parsed: $script"
+          done
+
+      - name: Parse PowerShell
+        # ubuntu-latest ships PowerShell, so the .ps1 files can be parsed for
+        # real without a Windows runner. A parse error fails this step.
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($file in @(
+            'scripts/bootstrap/install.ps1',
+            'scripts/windows/run-daily.ps1'
+          )) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file), [ref]$null, [ref]$errors
+            ) | Out-Null
+            if ($errors) {
+              Write-Host "parse errors in ${file}:"
+              $errors | ForEach-Object { Write-Host "  $($_.Extent.StartLineNumber): $($_.Message)" }
+              $failed = $true
+            }
+            else {
+              Write-Host "parsed: $file"
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          $results = Invoke-ScriptAnalyzer -Path scripts/bootstrap/install.ps1 -Severity Error, Warning
+          $results | Format-Table -AutoSize | Out-String | Write-Host
+          if ($results) { exit 1 }
+
+      - name: The installers must agree with pyproject on the minimum Python
+        # Each installer hardcodes the minimum version so it can check for a
+        # usable interpreter before it has a virtualenv to import anything in.
+        # That duplication is only safe if something notices it going stale.
+        run: |
+          python - <<'PY'
+          import re
+          import sys
+          import tomllib
+
+          with open("pyproject.toml", "rb") as handle:
+              spec = tomllib.load(handle)["project"]["requires-python"]
+
+          match = re.fullmatch(r">=(\d+)\.(\d+)", spec.strip())
+          if not match:
+              sys.exit(f"cannot read a floor out of requires-python={spec!r}")
+          major, minor = match.group(1), match.group(2)
+
+          # What each installer claims to require.
+          claims = {
+              "install.sh": r"PY_MIN_MINOR=(\d+)",
+              "scripts/bootstrap/install.ps1": r"PyMinMinor\s*=\s*(\d+)",
+          }
+          bad = False
+          for path, pattern in claims.items():
+              found = re.search(pattern, open(path, encoding="utf-8").read())
+              if not found:
+                  print(f"  {path}: could not find the declared minimum")
+                  bad = True
+              elif found.group(1) != minor:
+                  print(f"  {path}: says >=3.{found.group(1)}, pyproject says >=3.{minor}")
+                  bad = True
+              else:
+                  print(f"  {path}: >=3.{minor} matches pyproject")
+
+          if bad:
+              sys.exit("the installers and pyproject.toml disagree on the minimum Python")
+          PY
+
+      - name: .env.example must not ship values that break a fresh install
+        # REWARDS_ACCOUNTS is parsed as a comma-separated list of profile
+        # directory names, and REWARDS_BROWSER_TESTS turns on the tests that
+        # launch a real browser. A placeholder in either one is a trap, because
+        # copying the file to .env is the documented first step.
+        run: |
+          python - <<'PY'
+          import re
+          import sys
+
+          text = open(".env.example", encoding="utf-8").read()
+          active = [
+              line for line in text.splitlines()
+              if line.strip() and not line.lstrip().startswith("#")
+          ]
+          bad = False
+
+          sources = [line for line in active if line.startswith("QUERY_SOURCE=")]
+          if len(sources) != 1:
+              print(f"  .env.example: {len(sources)} active QUERY_SOURCE lines, want exactly 1")
+              bad = True
+          else:
+              print(f"  .env.example: one QUERY_SOURCE ({sources[0].split('=', 1)[1]})")
+
+          for name, pattern in (
+              ("REWARDS_ACCOUNTS", r"^REWARDS_ACCOUNTS=(.*)$"),
+              ("REWARDS_BROWSER_TESTS", r"^REWARDS_BROWSER_TESTS=(.*)$"),
+          ):
+              for line in active:
+                  found = re.match(pattern, line)
+                  if not found:
+                      continue
+                  if found.group(1).strip():
+                      print(f"  .env.example: {name} is set to {found.group(1)!r}, want empty")
+                      bad = True
+                  else:
+                      print(f"  .env.example: {name} is empty as intended")
+
+          if bad:
+              sys.exit(".env.example would break a fresh install")
+          PY
+
+      - name: The generated requirements must be installable
+        # The installers turn pyproject's dependency list into a pip command.
+        # Parsing it here means a syntax change in pyproject cannot ship an
+        # installer that fails on its first real run.
+        run: |
+          python - <<'PY'
+          import tomllib
+
+          with open("pyproject.toml", "rb") as handle:
+              deps = tomllib.load(handle)["project"]["dependencies"]
+
+          for dep in deps:
+              normalized = dep.replace(" (", "(").replace(" )", ")")
+              # PEP 508 name, then the rest as version specifiers.
+              name, sep, rest = normalized.partition("(")
+              assert sep, f"no version specifier on {dep!r}"
+              assert name.strip(), f"empty package name in {dep!r}"
+              assert rest.endswith(")"), f"unbalanced specifier in {dep!r}"
+          print(f"  {len(deps)} dependencies parse as PEP 508")
+          PY

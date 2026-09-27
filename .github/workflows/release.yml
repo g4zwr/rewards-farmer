@@ -1,0 +1,179 @@
+name: Release
+
+# Tag a version and the installers are bundled into a GitHub Release:
+#
+#     git tag v1.2.0 && git push origin v1.2.0
+#
+# The point of the archives is that they are self-sufficient. Running
+# install.sh or install.bat from one downloads the rest of the project, so a
+# user never has to know what a git clone is in order to get started.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish a release for'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          set -euo pipefail
+          # On a tag push GITHUB_REF_NAME is already the tag. On a manual
+          # dispatch it is whichever branch the workflow was started from, and
+          # the tag the user asked for lives in the input instead. Trusting
+          # GITHUB_REF_NAME there would build the right code under the wrong
+          # name and then try to publish a release for a branch, so the input
+          # has to win.
+          tag="${{ inputs.tag }}"
+          if [ -z "$tag" ]; then
+            tag="$GITHUB_REF_NAME"
+          fi
+
+          if [ "${tag#v}" = "$tag" ]; then
+            echo "::error::tag '$tag' must start with v, e.g. v1.2.3"
+            exit 1
+          fi
+          if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::tag '$tag' does not exist. Create and push it first:"
+            echo "::error::    git tag $tag && git push origin $tag"
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "publishing $tag as version ${tag#v}"
+
+      - name: Refuse to ship installers that do not parse
+        # A broken installer is worse than no release, because it is what a new
+        # user downloads first. Both files are checked before anything is built.
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck --severity=style install.sh
+          bash -n install.sh
+          test -f install.bat
+          test -f scripts/bootstrap/install.ps1
+          echo "installers present and the shell one parses"
+
+      - name: Build archives
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import io
+          import os
+          import tarfile
+          import zipfile
+
+          version = os.environ["VERSION"]
+          root = "rewards-farmer-installer-" + version
+
+          # Both archives carry the same explanatory files. install.sh and
+          # install.ps1 are the entry points; the scripts directory is needed
+          # because the Windows entry point is the batch file's PowerShell
+          # target, not a single file.
+          unix_files = [
+              "install.sh",
+              ".env.example",
+              "README.md",
+              "LICENSE",
+          ]
+          windows_files = [
+              "install.bat",
+              "scripts/bootstrap/install.ps1",
+              ".env.example",
+              "README.md",
+              "LICENSE",
+          ]
+
+          for path in unix_files + windows_files:
+              if not os.path.isfile(path):
+                  raise SystemExit(f"missing {path} - cannot build a release without it")
+
+          def read(path):
+              with open(path, "rb") as handle:
+                  return handle.read()
+
+          # Deterministic members: fixed timestamp, so rebuilding the same
+          # commit produces the same archive.
+          stamp = (2020, 1, 1, 0, 0, 0)
+
+          tar_path = root + "-unix.tar.gz"
+          with tarfile.open(tar_path, "w:gz", format=tarfile.PAX_FORMAT) as tar:
+              for path in unix_files:
+                  info = tarfile.TarInfo(root + "/" + path)
+                  payload = read(path)
+                  info.size = len(payload)
+                  info.mtime = 0
+                  info.mode = 0o755 if path.endswith(".sh") else 0o644
+                  tar.addfile(info, io.BytesIO(payload))
+
+          zip_path = root + "-windows.zip"
+          with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+              for path in windows_files:
+                  info = zipfile.ZipInfo(root + "/" + path, date_time=stamp)
+                  # 0o755 << 16 is the external attribute that carries the
+                  # unix mode, harmless on Windows and useful if the archive is
+                  # unpacked on anything else.
+                  info.external_attr = (0o755 if path.endswith((".sh", ".bat", ".ps1")) else 0o644) << 16
+                  info.compress_type = zipfile.ZIP_DEFLATED
+                  archive.writestr(info, read(path))
+
+          with open("SHA256SUMS", "w", encoding="utf-8") as sums:
+              for name in (tar_path, zip_path):
+                  digest = hashlib.sha256(read(name)).hexdigest()
+                  sums.write(f"{digest}  {name}\n")
+                  print(f"  {digest}  {name}")
+
+          print("built " + tar_path + " and " + zip_path)
+          PY
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="$TAG"
+          version="$VERSION"
+
+          # Create if this tag has no release yet; upload assets if it does, so
+          # re-running the workflow replaces the archives rather than failing
+          # on a duplicate asset name.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" \
+              --clobber \
+              SHA256SUMS \
+              rewards-farmer-installer-"$version"-unix.tar.gz \
+              rewards-farmer-installer-"$version"-windows.zip
+            echo "updated release for $tag"
+          else
+            gh release create "$tag" \
+              --title "v$version" \
+              --generate-notes \
+              SHA256SUMS \
+              rewards-farmer-installer-"$version"-unix.tar.gz \
+              rewards-farmer-installer-"$version"-windows.zip
+            echo "created release for $tag"
+          fi
