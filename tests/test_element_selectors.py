@@ -203,6 +203,55 @@ class DailySetOpener(unittest.TestCase):
 			selectors_for(driver).get_open_daily_set_button()
 
 
+class VisualSearchOpener(unittest.TestCase):
+	"""The positional fallback has to check what is actually in its slot.
+
+	Same failure as reports #45 and #46, on the other task. Where the layout
+	ships no visual search label, position 5 of the streaks section is not
+	guaranteed to be the visual search entry; a partially rendered section puts
+	the mobile app entry there, and clicking that opens the app store page.
+	"""
+
+	POSITION_5 = "./div/div[2]/div/div/button[5]"
+
+	def _driver(self, position_5):
+		# Only a daily set label up top, so the by-label lookup misses and the
+		# fallback is the thing under test.
+		streaks = FakeElement(
+			attributes={"id": "streaks"},
+			children={(By.XPATH, self.POSITION_5): [FakeElement(text=position_5)]},
+		)
+
+		return FakeDriver(
+			children={
+				(By.TAG_NAME, "button"): [FakeElement(text="Daily Set Streak\nDay 1 of 3 streak completed.")],
+				(By.ID, "streaks"): [streaks],
+			}
+		)
+
+	def test_matches_the_streak_button_by_label(self):
+		driver = FakeDriver(
+			children={(By.TAG_NAME, "button"): [FakeElement(text="Visual Search Streak\nDay 1 of 7 streak completed.")]}
+		)
+
+		button = selectors_for(driver).get_open_visual_search_sidebar()
+
+		self.assertIn("Visual Search Streak", button.text)
+
+	def test_falls_back_to_position_five_when_the_label_differs(self):
+		# The label is not the one this market ships, but position 5 really is
+		# the visual search entry, so the fallback is doing its job.
+		button = selectors_for(self._driver("Visual Search\nDay 1 of 7 streak completed.")).get_open_visual_search_sidebar()
+
+		self.assertIn("Visual Search", button.text)
+
+	def test_refuses_the_mobile_app_entry_in_position_five(self):
+		# Handing this back means clicking the app store link, so the task has
+		# to fail here and be reported as unavailable instead.
+		with self.assertRaises(NoSuchElementException):
+			selectors_for(self._driver("Bing App Streak\nDay 1 of 5")).get_open_visual_search_sidebar()
+
+
 class DailySetActivityUrls(unittest.TestCase):
 	"""Which hrefs in the panel count as activities and which are promos."""
 

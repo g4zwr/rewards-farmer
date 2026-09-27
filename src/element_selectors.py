@@ -272,8 +272,23 @@ class ElementSelectionUtils:
 			return self._button_containing(Labels.VISUAL_SEARCH_STREAK)
 		except NoSuchElementException:
 			# Not every layout ships this entry point. Where it does but the
-			# label differs, fall back to the original position in streaks.
-			return self._streaks_button(5)
+			# label differs, fall back to the original position in streaks --
+			# but check what came back before handing it on, for the same
+			# reason the daily set opener above checks position 3. A partially
+			# rendered streaks section shifts these slots, and the mobile app
+			# entry is what lands there; clicking it opens the app store page
+			# instead of the sidebar. Skipping the task is the better failure.
+			candidate = self._streaks_button(5)
+			label = (candidate.text or "").strip()
+
+			if "visual search" not in label.lower():
+				raise NoSuchElementException(
+					"visual search opener not found by label, and position 5 "
+					f"holds {label.splitlines()[0] if label else '<empty>'!r} "
+					"instead"
+				)
+
+			return candidate
 
 	def get_search_now_link_from_visual_search_sidebar(self):
 		sidebar = self.get_sidebar_section()
