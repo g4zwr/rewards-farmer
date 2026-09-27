@@ -61,18 +61,25 @@ The same run a second time does nothing at all — see
 
 ### One command (recommended)
 
-**Windows** — download `install.bat` from the
-[latest release](https://github.com/g4zwr/rewards-farmer/releases/latest) and
-double-click it. A console opens, asks a few questions, and does the rest. The
-same archive works from PowerShell with `.\install.ps1`.
+**Windows** — download the `*-windows.zip` from the
+[latest release](https://github.com/g4zwr/rewards-farmer/releases/latest),
+extract it, and double-click `install.bat`. A console opens, asks a few
+questions, and does the rest. `install.bat` is a thin launcher for the
+PowerShell bootstrap next to it, so the same thing works from a terminal with
+`.\scripts\bootstrap\install.ps1`.
 
-**macOS and Linux** — clone, then run the installer:
+**macOS and Linux** — either download the `*-unix.tar.gz` from the
+[latest release](https://github.com/g4zwr/rewards-farmer/releases/latest) and
+run the `install.sh` inside it, or clone and run the installer:
 
 ```sh
 git clone https://github.com/g4zwr/rewards-farmer
 cd rewards-farmer
 ./install.sh
 ```
+
+Both archives carry only what the installer needs to start; it downloads the
+rest of the project itself, so you never have to know what a `git clone` is.
 
 The installer sets up everything needed to run: a private `.venv`, the
 dependencies, the image the visual-search task uploads, a `.env`, and a daily
