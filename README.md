@@ -59,14 +59,51 @@ The same run a second time does nothing at all — see
 > techniques used to reduce detection. Nothing here changes your account's
 > standing in Microsoft's eyes.
 
+### One command (recommended)
+
+**Windows** — download `install.bat` from the
+[latest release](https://github.com/g4zwr/rewards-farmer/releases/latest) and
+double-click it. A console opens, asks a few questions, and does the rest. The
+same archive works from PowerShell with `.\install.ps1`.
+
+**macOS and Linux** — clone, then run the installer:
+
 ```sh
 git clone https://github.com/g4zwr/rewards-farmer
 cd rewards-farmer
-poetry install
+./install.sh
 ```
 
-Then follow the section for your platform below. The only genuinely manual part
-of the whole project is signing in to Microsoft once, by hand.
+The installer sets up everything needed to run: a private `.venv`, the
+dependencies, the image the visual-search task uploads, a `.env`, and a daily
+schedule. It never installs a system package without first printing the exact
+command and waiting for you to agree, so you always see what a `sudo` will do.
+
+Both installers accept a few switches:
+
+| Switch | Effect |
+| --- | --- |
+| `-y`, `--yes` / `-Yes` | Answer yes to everything. Useful in CI; read the first bullet above before using it unattended. |
+| `--no-edge` / `-NoEdge` | Skip Microsoft Edge installation and report it if missing. |
+| `--no-schedule` / `-NoSchedule` | Set up the project but do not register the daily job. |
+| `--dir PATH` / `-Dir PATH` | Install somewhere other than the current directory. |
+| `--help` | Print the usage text and exit. |
+
+Edge itself is the one hard requirement. If it cannot be installed, the installer
+says so and continues, because the rest of the setup is still worth having — the
+run will stop later, with a clear message, rather than here.
+
+**Signing in is the only genuinely manual part of the whole project.** The
+installer finishes by printing the command to start it; the first run opens a
+visible window so you can sign in to Bing and to `rewards.bing.com` by hand,
+after which it runs unattended. See [If Edge will not start](#if-edge-will-not-start)
+if the window does not appear.
+
+<details>
+<summary><strong>Manual setup (if you would rather not use the installer)</strong></summary>
+
+These steps are the same ones the installer performs, written out for the case
+where you want to run them yourself. They assume `git clone` and `poetry`.
 
 <details>
 <summary><strong>Windows (PowerShell)</strong></summary>
@@ -188,6 +225,8 @@ must match exactly.
 
 </details>
 
+</details>
+
 ---
 
 ## Table of Contents
@@ -275,9 +314,15 @@ Run it by hand whenever you like — it is safe to do so:
 
 ### Linux (systemd)
 
+The installer registers this for you and writes the unit with your checkout's
+real path already filled in. To do it by hand, substitute your own path in place
+of `REPO_DIR_PLACEHOLDER`:
+
 ```sh
-# Adjust these two lines in the service if your clone is not in ~/rewards-farmer
-cp scripts/systemd/rewards-farmer.{service,timer} ~/.config/systemd/user/
+mkdir -p ~/.config/systemd/user
+sed "s|REPO_DIR_PLACEHOLDER|$PWD|g" scripts/systemd/rewards-farmer.service \
+  > ~/.config/systemd/user/rewards-farmer.service
+cp scripts/systemd/rewards-farmer.timer ~/.config/systemd/user/
 
 # Survive logout, so the timer keeps working with nobody signed in
 sudo loginctl enable-linger "$USER"
@@ -288,6 +333,11 @@ systemctl --user enable --now rewards-farmer.timer
 # Check it is armed
 systemctl --user list-timers rewards-farmer.timer
 ```
+
+The `Environment=` lines in the unit pin Edge and the driver so the timer does
+not depend on your login shell's `PATH`. Fill them in if you know where they
+are, or delete both lines: Selenium Manager finds both on its own, and a path
+pinned to a binary that has since moved is worse than no pin at all.
 
 `Persistent=true` means a slot missed because the machine was off fires on next
 login instead of being silently skipped.
@@ -316,15 +366,20 @@ below and schedule that instead.
 ### macOS (launchd)
 
 ```sh
-# Set the three REPLACE_ME values in the plist to your home directory first
-cp scripts/macos/com.g4zwr.rewards-farmer.plist ~/Library/LaunchAgents/
-mkdir -p ~/Library/Logs/rewards-farmer      # launchd opens these before the script runs
+mkdir -p ~/Library/LaunchAgents ~/Library/Logs/rewards-farmer   # launchd opens the logs before the script runs
+
+sed -e "s|REPO_DIR_PLACEHOLDER|$PWD|g" \
+    -e "s|HOME_PLACEHOLDER|$HOME|g" \
+    scripts/macos/com.g4zwr.rewards-farmer.plist \
+    ~/Library/LaunchAgents/com.g4zwr.rewards-farmer.plist
 
 launchctl load ~/Library/LaunchAgents/com.g4zwr.rewards-farmer.plist
 launchctl list | grep rewards-farmer
 ```
 
-Unload it again with the same command and `unload` in place of `load`.
+The installer performs exactly those substitutions, so this is only needed if
+you set the schedule up yourself. Unload it again with the same command and
+`unload` in place of `load`.
 
 `launchd` runs jobs with almost no environment, which is why the plist states
 `PATH` and `HOME` explicitly.
