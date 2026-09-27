@@ -64,12 +64,40 @@ jobs:
           if ($failed) { exit 1 }
 
       - name: Run PSScriptAnalyzer
+        # Errors and warnings both fail the build, because most of what this
+        # rules on is worth catching. Three rules are excluded, each because
+        # they report this script wrong rather than because its findings are
+        # inconvenient.
         shell: pwsh
         run: |
           Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
-          $results = Invoke-ScriptAnalyzer -Path scripts/bootstrap/install.ps1 -Severity Error, Warning
-          $results | Format-Table -AutoSize | Out-String | Write-Host
-          if ($results) { exit 1 }
+
+          $Skip = @(
+            # This is an interactive console installer. Write-Host is how it
+            # talks to the person running it; the rule is aimed at modules that
+            # need to emit capturable objects instead.
+            'PSAvoidUsingWriteHost'
+
+            # Stop-WithError only prints and sets an exit code. It matches on
+            # the "Stop-" verb and so is asked to support ShouldProcess.
+            'PSUseShouldProcessForStateChangingFunctions'
+
+            # False positive here: $Yes is read twice further down the file, to
+            # auto-answer the prompts and to mention itself in the no-console
+            # error. The rule does not follow references into the body.
+            'PSReviewUnusedParameter'
+          )
+
+          $results = Invoke-ScriptAnalyzer `
+            -Path scripts/bootstrap/install.ps1 `
+            -Severity Error, Warning `
+            -ExcludeRule $Skip
+
+          if ($results) {
+            $results | Format-Table -AutoSize | Out-String | Write-Host
+            exit 1
+          }
+          Write-Host "no PSScriptAnalyzer errors or warnings (excluding: $($Skip -join ', '))"
 
       - name: The installers must agree with pyproject on the minimum Python
         # Each installer hardcodes the minimum version so it can check for a
