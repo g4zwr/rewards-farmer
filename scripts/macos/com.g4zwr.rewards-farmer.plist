@@ -2,13 +2,16 @@
 <!--
 	Run the Microsoft Rewards farmer at most once per local day.
 
-	Install (change the three paths below if your clone lives elsewhere, then
-	reload so the edits take effect):
+	install.sh (or install.bat) writes this file to ~/Library/LaunchAgents with
+	REPO_DIR_PLACEHOLDER and HOME_PLACEHOLDER already replaced, so a clone
+	anywhere works. To do it by hand instead:
 
-		cp scripts/macos/com.g4zwr.rewards-farmer.plist ~/Library/LaunchAgents/
-		mkdir -p ~/Library/Logs/rewards-farmer
-		launchctl unload ~/Library/LaunchAgents/com.g4zwr.rewards-farmer.plist
-		launchctl load  ~/Library/LaunchAgents/com.g4zwr.rewards-farmer.plist
+		mkdir -p ~/Library/LaunchAgents ~/Library/Logs/rewards-farmer
+		sed -e "s|REPO_DIR_PLACEHOLDER|$PWD|g" \
+		    -e "s|HOME_PLACEHOLDER|$HOME|g" \
+		    scripts/macos/com.g4zwr.rewards-farmer.plist \
+		    ~/Library/LaunchAgents/com.g4zwr.rewards-farmer.plist
+		launchctl load ~/Library/LaunchAgents/com.g4zwr.rewards-farmer.plist
 
 	Check it is armed:
 
@@ -30,7 +33,7 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/bin/bash</string>
-		<string>REPLACE_ME/rewards-farmer/scripts/run_daily.sh</string>
+		<string>REPO_DIR_PLACEHOLDER/scripts/run_daily.sh</string>
 	</array>
 
 	<!-- 08:00 picks up the new day; 20:00 retries a day that did not finish. -->
@@ -53,11 +56,11 @@
 		<key>PATH</key>
 		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
 		<key>HOME</key>
-		<string>REPLACE_ME</string>
+		<string>HOME_PLACEHOLDER</string>
 	</dict>
 
 	<key>WorkingDirectory</key>
-	<string>REPLACE_ME/rewards-farmer</string>
+	<string>REPO_DIR_PLACEHOLDER</string>
 
 	<!-- launchd opens these before the script runs, so the directory has to
 		exist first (run `mkdir -p ~/Library/Logs/rewards-farmer` in the install

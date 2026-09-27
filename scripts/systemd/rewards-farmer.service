@@ -6,11 +6,13 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 
-# Both of these assume the clone lives in ~/rewards-farmer. If you cloned it
-# somewhere else, change these two lines and reload -- `systemctl --user cat
-# rewards-farmer` prints what is actually in effect.
-WorkingDirectory=%h/rewards-farmer
-ExecStart=%h/rewards-farmer/scripts/run_daily.sh
+# The two paths below are rewritten to the real location when the installer
+# copies this file into ~/.config/systemd/user, so a clone anywhere is handled.
+# If you copy the file by hand instead, set both of them to your own path, then
+# run `systemctl --user daemon-reload`. `systemctl --user cat rewards-farmer`
+# prints whatever is actually in effect.
+WorkingDirectory=REPO_DIR_PLACEHOLDER
+ExecStart=REPO_DIR_PLACEHOLDER/scripts/run_daily.sh
 
 # A run takes roughly a minute or two. The ceiling is well above that on
 # purpose: if something wedges, systemd kills the run, and because run_daily.sh
@@ -21,7 +23,10 @@ TimeoutStartSec=30min
 # an unattended run should never make the desktop feel slow.
 Nice=10
 
-# A timer gets a much smaller environment than your terminal, so pin the
-# browser paths instead of trusting PATH. Adjust if yours live elsewhere.
-Environment=EDGE_BINARY=/usr/bin/microsoft-edge-stable
-Environment=MSEDGEDRIVER_PATH=/usr/local/bin/msedgedriver
+# A timer gets a much smaller environment than your terminal, so the browser
+# paths are pinned when they can be found. The installer substitutes the real
+# paths and deletes a line whose binary it could not locate, because Selenium
+# Manager finds both by itself and a stale path pinned here would be worse than
+# no pin at all.
+Environment=EDGE_BINARY=EDGE_PLACEHOLDER
+Environment=MSEDGEDRIVER_PATH=DRIVER_PLACEHOLDER
