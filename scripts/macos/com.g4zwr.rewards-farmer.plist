@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+	Run the Microsoft Rewards farmer at most once per local day.
+
+	Install (change the three paths below if your clone lives elsewhere, then
+	reload so the edits take effect):
+
+		cp scripts/macos/com.g4zwr.rewards-farmer.plist ~/Library/LaunchAgents/
+		mkdir -p ~/Library/Logs/rewards-farmer
+		launchctl unload ~/Library/LaunchAgents/com.g4zwr.rewards-farmer.plist
+		launchctl load  ~/Library/LaunchAgents/com.g4zwr.rewards-farmer.plist
+
+	Check it is armed:
+
+		launchctl list | grep rewards-farmer
+
+	Stop it again:
+
+		launchctl unload ~/Library/LaunchAgents/com.g4zwr.rewards-farmer.plist
+
+	The once-a-day guard lives in scripts/run_daily.sh, so the 20:00 slot is a
+	no-op whenever the 08:00 one succeeded. macOS has no flock, which is why
+	that script falls back to an atomic mkdir for its lock.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.g4zwr.rewards-farmer</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>REPLACE_ME/rewards-farmer/scripts/run_daily.sh</string>
+	</array>
+
+	<!-- 08:00 picks up the new day; 20:00 retries a day that did not finish. -->
+	<key>StartCalendarInterval</key>
+	<array>
+		<dict>
+			<key>Hour</key><integer>8</integer>
+			<key>Minute</key><integer>0</integer>
+		</dict>
+		<dict>
+			<key>Hour</key><integer>20</integer>
+			<key>Minute</key><integer>0</integer>
+		</dict>
+	</array>
+
+	<!-- launchd runs jobs with almost no environment, so PATH and HOME have to
+		be stated. /opt/homebrew is Apple Silicon; drop it on Intel. -->
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>HOME</key>
+		<string>REPLACE_ME</string>
+	</dict>
+
+	<key>WorkingDirectory</key>
+	<string>REPLACE_ME/rewards-farmer</string>
+
+	<!-- launchd opens these before the script runs, so the directory has to
+		exist first (run `mkdir -p ~/Library/Logs/rewards-farmer` in the install
+		step. They are kept out of the repo on purpose: a log file appearing in
+		the clone would show up in `git status` every day. The per-day log under
+		~/.local/state/rewards-farmer/logs is the one actually worth reading. -->
+	<key>StandardOutPath</key>
+	<string>HOME_PLACEHOLDER/Library/Logs/rewards-farmer/launchd.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>HOME_PLACEHOLDER/Library/Logs/rewards-farmer/launchd.err.log</string>
+
+	<key>RunAtLoad</key>
+	<false/>
+	<key>StandardOut</key>
+	<false/>
+	<key>StandardError</key>
+	<false/>
+</dict>
+</plist>

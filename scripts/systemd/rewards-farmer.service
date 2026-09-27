@@ -1,0 +1,27 @@
+[Unit]
+Description=Microsoft Rewards farmer (at most once per day)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# Both of these assume the clone lives in ~/rewards-farmer. If you cloned it
+# somewhere else, change these two lines and reload -- `systemctl --user cat
+# rewards-farmer` prints what is actually in effect.
+WorkingDirectory=%h/rewards-farmer
+ExecStart=%h/rewards-farmer/scripts/run_daily.sh
+
+# A run takes roughly a minute or two. The ceiling is well above that on
+# purpose: if something wedges, systemd kills the run, and because run_daily.sh
+# only marks the day done on a clean exit, the evening slot still picks it up.
+TimeoutStartSec=30min
+
+# Yield to anything you are actually doing. This is not latency sensitive, and
+# an unattended run should never make the desktop feel slow.
+Nice=10
+
+# A timer gets a much smaller environment than your terminal, so pin the
+# browser paths instead of trusting PATH. Adjust if yours live elsewhere.
+Environment=EDGE_BINARY=/usr/bin/microsoft-edge-stable
+Environment=MSEDGEDRIVER_PATH=/usr/local/bin/msedgedriver

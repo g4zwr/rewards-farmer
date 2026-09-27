@@ -1,0 +1,23 @@
+[Unit]
+Description=Run the Microsoft Rewards farmer once a day
+
+[Timer]
+# 08:00 picks up the new day's points. 20:00 is the second chance for the two
+# cases that matter: the morning run failed, or the machine was asleep and
+# missed it. The once-a-day guard in run_daily.sh makes the second fire a no-op
+# whenever the first one succeeded, so this costs nothing on a good day.
+OnCalendar=*-*-* 08:00:00
+OnCalendar=*-*-* 20:00:00
+
+# Fires on next login if a scheduled time passed while the machine was off, so
+# a missed day is picked up rather than silently skipped.
+Persistent=true
+
+# systemd otherwise coalesces timers into a window of up to four minutes. There
+# is no reason for that here; the run is short and nobody is waiting on it.
+AccuracySec=1min
+
+Unit=rewards-farmer.service
+
+[Install]
+WantedBy=timers.target
