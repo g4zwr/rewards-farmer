@@ -34,6 +34,13 @@ jobs:
 
       - name: Resolve tag
         id: tag
+        env:
+          # Read through env rather than ${{ }} inside the script. An
+          # expression is pasted into the shell source before bash parses it,
+          # so a tag containing a quote would close the assignment and run
+          # whatever followed. workflow_dispatch is a user-supplied input and
+          # only the workflow author should get to choose what bash executes.
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           # On a tag push GITHUB_REF_NAME is already the tag. On a manual
@@ -42,7 +49,7 @@ jobs:
           # GITHUB_REF_NAME there would build the right code under the wrong
           # name and then try to publish a release for a branch, so the input
           # has to win.
-          tag="${{ inputs.tag }}"
+          tag="$INPUT_TAG"
           if [ -z "$tag" ]; then
             tag="$GITHUB_REF_NAME"
           fi

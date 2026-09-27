@@ -33,6 +33,16 @@ TODAY="$(date +%F)"
 MARKER="$STATE_DIR/last-success-$TODAY"
 LOCK="$STATE_DIR/run.lock"
 
+# Is the existing lock old enough to be a leftover rather than a live run?
+# find -mmin is not portable, and stat(1) spells the modification time
+# differently on GNU and BSD, so ask stat for the epoch and compare by hand.
+lock_is_stale() {
+	local mtime now
+	mtime=$(stat -c %Y "$LOCK" 2>/dev/null) || mtime=$(stat -f %m "$LOCK" 2>/dev/null) || return 1
+	now=$(date +%s)
+	[ "$(( (now - mtime) / 60 ))" -gt 60 ]
+}
+
 mkdir -p "$STATE_DIR" "$LOG_DIR"
 LOG_FILE="$LOG_DIR/run-$TODAY.log"
 
@@ -53,13 +63,16 @@ if command -v flock >/dev/null 2>&1; then
 		exit 0
 	fi
 else
-	mkdir "$LOCK" 2>/dev/null || {
-		echo "run_daily: another run holds $LOCK, nothing to do." >&2
-		exit 0
-	}
-
-	# Any run is minutes at most, so an hour-old lock can only be a leftover.
-	find "$LOCK" -maxdepth 0 -mmin +60 -exec rmdir {} + 2>/dev/null && mkdir "$LOCK" 2>/dev/null || true
+	if ! mkdir "$LOCK" 2>/dev/null; then
+		# Someone already has it. Any run is minutes at most, so an hour-old
+		# lock can only be a leftover from a run the machine powered off
+		# mid-way, and it has to be taken over: leaving it would make every
+		# future run bail out here and the job would never run again.
+		if ! lock_is_stale || ! rmdir "$LOCK" 2>/dev/null || ! mkdir "$LOCK" 2>/dev/null; then
+			echo "run_daily: another run holds $LOCK, nothing to do." >&2
+			exit 0
+		fi
+	fi
 	trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 fi
 
