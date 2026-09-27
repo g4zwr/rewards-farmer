@@ -522,8 +522,9 @@ REWARDS_ACCOUNTS=personal,spare docker compose run --rm rewards-farmer
 ```
 
 `REWARDS_HEADLESS=1` is set in the image. It also works on the host if you want
-a run with no visible window; the pointer code needs an explicit window size in
-that mode, which `main.py` sets.
+a run with no visible window. `src/browser.py` pins `--window-size=1920,1080` in
+that mode, because the pointer code works in viewport coordinates and the
+default headless window is small enough to put cards out of reach.
 
 ---
 
